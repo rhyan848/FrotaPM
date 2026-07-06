@@ -1,0 +1,28 @@
+name: Deploy FrotaPM site to GitHub Pages
+
+on:
+  push:
+    branches: [ add-monitoramento-site ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # ensure full history so Pages can compute correctly
+          fetch-depth: 0
+
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v1
