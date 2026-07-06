@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FrotaPM — Monitoramento (Demo) — Blumenau</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+e2g0K6wD9h2hZ6w2s1mG3Q2RYqk1YvV8q2egQv/k=" crossorigin=""/>
+
+  <style>
+    :root{
+      --accent:#1e88e5;
+      --bg:#f7f9fc;
+      --card:#ffffff;
+      --muted:#6b7280;
+      --danger:#e53935;
+      --success:#2e7d32;
+      --warning:#f57f17;
+      --sidebar-width:340px;
+    }
+
+    html,body,#map{height:100%;}
+    body{
+      margin:0;
+      font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background:var(--bg);
+      color:#111827;
+      display:flex;
+      flex-direction:column;
+      height:100vh;
+    }
+
+    header{height:64px;display:flex;align-items:center;padding:0 16px;background:linear-gradient(90deg, rgba(30,136,229,0.12), rgba(30,136,229,0.04));border-bottom:1px solid rgba(15,23,42,0.04);gap:12px}
+    header h1{font-size:18px;margin:0}
+    header .meta{margin-left:auto;color:var(--muted);font-size:13px}
+
+    .container{display:flex;flex:1;min-height:0}
+
+    .sidebar{width:var(--sidebar-width);background:var(--card);border-right:1px solid rgba(15,23,42,0.04);padding:12px;box-sizing:border-box;overflow:auto}
+    .sidebar .section-title{font-weight:600;margin-bottom:8px}
+    .filters{display:flex;gap:8px;margin-bottom:8px}
+    .filters input, .filters select{padding:6px 8px;border-radius:6px;border:1px solid #e5e7eb;background:#fff;width:100%}
+    .vehicle-list{display:flex;flex-direction:column;gap:8px}
+    .vehicle-card{padding:8px;border-radius:8px;border:1px solid rgba(15,23,42,0.04);display:flex;gap:8px;align-items:center;background:linear-gradient(180deg,#fff,#fbfdff);cursor:pointer}
+    .vehicle-card:hover{box-shadow:0 6px 18px rgba(2,6,23,0.06);transform:translateY(-1px)}
+    .vehicle-dot{width:12px;height:12px;border-radius:50%}
+    .vehicle-info{flex:1}
+    .vehicle-placa{font-weight:700}
+    .vehicle-meta{font-size:13px;color:var(--muted)}
+
+    #map{flex:1;position:relative}
+
+    .status-bar{position:absolute;left:12px;bottom:12px;background:rgba(255,255,255,0.95);padding:8px 10px;border-radius:8px;border:1px solid rgba(2,6,23,0.06);font-size:13px;box-shadow:0 6px 18px rgba(2,6,23,0.06)}
+
+    @media (max-width:900px){.sidebar{width:100%;height:300px;order:2;border-right:0;border-top:1px solid rgba(15,23,42,0.04)}.container{flex-direction:column}#map{order:1;height:calc(100vh - 64px - 300px)}}
+  </style>
+</head>
+<body>
+  <header>
+    <img src="https://raw.githubusercontent.com/google/material-design-icons/master/png/maps/local_shipping/materialicons/48dp/1x/baseline_local_shipping_black_48dp.png" alt="" width="36" height="36" style="border-radius:6px;background:#fff;padding:4px">
+    <h1>FrotaPM — Monitoramento (Demo)</h1>
+    <div class="meta">Demo com dados simulados • Blumenau, SC</div>
+  </header>
+
+  <div class="container">
+    <aside class="sidebar">
+      <div class="section-title">Busca / Filtros</div>
+      <div class="filters">
+        <input id="search-input" placeholder="Placa ou modelo..." />
+        <select id="status-filter">
+          <option value="">Todos status</option>
+          <option value="Operacional">Operacional</option>
+          <option value="Em Manutenção">Em Manutenção</option>
+          <option value="Inoperante">Inoperante</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <button id="btn-refresh" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);background:var(--accent);color:#fff;cursor:pointer">Atualizar</button>
+        <button id="btn-toggle-poll" title="Pausar/Retomar atualização simulada" style="padding:8px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);background:#fff;cursor:pointer">Pausar</button>
+      </div>
+
+      <div class="section-title">Veículos</div>
+      <div id="vehicle-list" class="vehicle-list" aria-live="polite"></div>
+
+      <div style="margin-top:12px;color:var(--muted);font-size:13px">Última atualização: <span id="last-updated">—</span><br/>Modo: <strong>Demo (sem conexão com API)</strong></div>
+
+      <hr style="margin:12px 0" />
+      <div style="font-size:13px;color:var(--muted)">
+        Para conectar à API real, edite o arquivo <code>index.html</code> no branch e altere para modo API fornecendo o endpoint e a chave.
+      </div>
+    </aside>
+
+    <div id="map"></div>
+  </div>
+
+  <div id="status" class="status-bar">Carregando mapa...</div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-h9+4qC5sQq9YFQZ6k3GH4cQw3b7rI1d3kDk9t6L0h2M=" crossorigin=""></script>
+
+  <script>
+    // CONFIGURAÇÃO
+    const DEMO_MODE = true; // true => usa dados simulados
+    const POLL_INTERVAL_MS = 3000; // intervalo de atualização da simulação
+
+    // Blumenau, SC (centro aproximado)
+    const MAP_CENTER = { lat: -26.9193, lng: -49.0661 };
+    const MAP_ZOOM = 13;
+
+    // utilitários
+    function nowLabel(){ return new Date().toLocaleTimeString(); }
+    function formatDateTime(d){ return new Date(d).toLocaleString(); }
+
+    function getStatusColor(status){
+      if(!status) return '#9ca3af';
+      if(status.toLowerCase().includes('oper')) return '#2e7d32';
+      if(status.toLowerCase().includes('manut')) return '#f57f17';
+      if(status.toLowerCase().includes('inoper')) return '#e53935';
+      return '#6b7280';
+    }
+
+    function createIcon(color){
+      return L.divIcon({className:'custom-marker',html:`<div style="width:18px;height:18px;border-radius:50%;background:${color};box-shadow:0 0 0 3px rgba(255,255,255,0.9);border:2px solid rgba(255,255,255,0.9)"></div>`,iconSize:[18,18],iconAnchor:[9,9]});
+    }
+
+    // inicializa mapa
+    const map = L.map('map').setView([MAP_CENTER.lat, MAP_CENTER.lng], MAP_ZOOM);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+
+    const markers = new Map();
+    const statusEl = document.getElementById('status');
+    const vehicleListEl = document.getElementById('vehicle-list');
+    const lastUpdatedEl = document.getElementById('last-updated');
+
+    // --- Demo data generator ---
+    const DEMO_VEHICLE_COUNT = 18;
+    const STATUSES = ['Operacional','Em Manutenção','Inoperante'];
+
+    function randomPlate(){
+      // BR style: 3 letters + 4 digits (approx)
+      const letters = String.fromCharCode(65+Math.floor(Math.random()*26)) + String.fromCharCode(65+Math.floor(Math.random()*26)) + String.fromCharCode(65+Math.floor(Math.random()*26));
+      const nums = ('0000' + Math.floor(Math.random()*10000)).slice(-4);
+      return letters+'-'+nums;
+    }
+
+    function createDemoVehicles(){
+      const vehicles = [];
+      for(let i=0;i<DEMO_VEHICLE_COUNT;i++){
+        const jitterLat = (Math.random()-0.5)*0.06; // ~6km
+        const jitterLng = (Math.random()-0.5)*0.06;
+        const lat = MAP_CENTER.lat + jitterLat;
+        const lng = MAP_CENTER.lng + jitterLng;
+        vehicles.push({
+          id: 'veh_'+i,
+          placa: randomPlate(),
+          modelo: ['Fiat Fiorino','Volkswagen Amarok','Renault Master','Ford Ranger','Iveco Daily'][i%5],
+          km_atual: Math.floor(20000 + Math.random()*180000),
+          status: STATUSES[Math.floor(Math.random()*STATUSES.length)],
+          proxima_manutencao_km: Math.floor(30000 + Math.random()*50000),
+          proxima_manutencao_data: new Date(Date.now() + Math.random()*1000*60*60*24*90).toISOString().slice(0,10),
+          created_date: new Date(Date.now() - Math.random()*1000*60*60*24*400).toISOString(),
+          latitude: lat,
+          longitude: lng
+        });
+      }
+      return vehicles;
+    }
+
+    let demoVehicles = createDemoVehicles();
+
+    function jitterPositions(){
+      // move each vehicle slightly to simulate movement
+      demoVehicles = demoVehicles.map(v => {
+        const speed = v.status === 'Inoperante' ? 0 : (Math.random()*0.0015); // degrees
+        const angle = Math.random()*Math.PI*2;
+        const dlat = Math.cos(angle)*speed;
+        const dlng = Math.sin(angle)*speed;
+        return Object.assign({}, v, { latitude: v.latitude + dlat, longitude: v.longitude + dlng });
+      });
+    }
+
+    // Fetch vehicles (demo or real)
+    async function fetchVehicles(){
+      if(DEMO_MODE){
+        // simulate network latency
+        await new Promise(r => setTimeout(r, 200 + Math.random()*400));
+        // apply movement
+        jitterPositions();
+        return demoVehicles;
+      } else {
+        // Implementation for real API would go here. For demo we return null.
+        return null;
+      }
+    }
+
+    function popupContentFor(v){
+      const placa = v.placa || '-';
+      const modelo = v.modelo || '-';
+      const km = (v.km_atual != null) ? v.km_atual : '-';
+      const status = v.status || '-';
+      const proxKm = v.proxima_manutencao_km ?? '-';
+      const proxDate = v.proxima_manutencao_data ?? '-';
+      const created = v.created_date ? formatDateTime(v.created_date) : '-';
+      const posInfo = (v.latitude!=null && v.longitude!=null) ? `Lat: ${v.latitude.toFixed(5)}, Lng: ${v.longitude.toFixed(5)}` : 'Sem coordenadas';
+      return `<div style="min-width:220px"><div style="font-weight:700">${placa} — ${modelo}</div><div style="font-size:13px;color:#374151;margin-top:6px">Status: <strong>${status}</strong><br/>Km atual: ${km}<br/>Próx. manut.: ${proxKm} km • ${proxDate}<br/>${posInfo}<br/>Criado: ${created}</div></div>`;
+    }
+
+    function updateMarkers(vehicles){
+      if(!vehicles) return;
+      const presentIds = new Set();
+      const q = document.getElementById('search-input').value.trim().toLowerCase();
+      const statusFilter = document.getElementById('status-filter').value;
+
+      vehicles.forEach(v => {
+        const id = v.id || v.placa || Math.random().toString(36).slice(2,8);
+        presentIds.add(id);
+
+        if(q){
+          const hay = ((v.placa||'') + ' ' + (v.modelo||'') + ' ' + (v.observacoes||'')).toLowerCase();
+          if(!hay.includes(q)) return;
+        }
+        if(statusFilter && (v.status !== statusFilter)) return;
+
+        const latlng = (v.latitude!=null && v.longitude!=null) ? [Number(v.latitude), Number(v.longitude)] : [MAP_CENTER.lat, MAP_CENTER.lng];
+        const color = getStatusColor(v.status);
+
+        if(markers.has(id)){
+          const m = markers.get(id);
+          m.setLatLng(latlng);
+          m.setPopupContent(popupContentFor(v));
+        } else {
+          const icon = createIcon(color);
+          const m = L.marker(latlng, { icon });
+          m.bindPopup(popupContentFor(v), { maxWidth:300 });
+          m.addTo(map);
+          markers.set(id, m);
+        }
+      });
+
+      // remove old
+      for(const id of Array.from(markers.keys())){
+        if(!presentIds.has(id)){
+          const m = markers.get(id);
+          map.removeLayer(m);
+          markers.delete(id);
+        }
+      }
+
+      renderVehicleList(vehicles, q, statusFilter);
+      lastUpdatedEl.textContent = new Date().toLocaleString();
+      statusEl.textContent = `Última verificação: ${nowLabel()} — ${vehicles.length} veículos (demo)`;
+    }
+
+    function renderVehicleList(vehicles, q, statusFilter){
+      vehicleListEl.innerHTML = '';
+      const filtered = vehicles.filter(v => {
+        if(q){
+          const hay = ((v.placa||'') + ' ' + (v.modelo||'') + ' ' + (v.observacoes||'')).toLowerCase();
+          if(!hay.includes(q)) return false;
+        }
+        if(statusFilter && (v.status !== statusFilter)) return false;
+        return true;
+      });
+
+      if(filtered.length === 0){
+        vehicleListEl.innerHTML = '<div style="color:var(--muted)">Nenhum veículo encontrado</div>';
+        return;
+      }
+
+      filtered.forEach(v => {
+        const id = v.id || v.placa || Math.random().toString(36).slice(2,8);
+        const placa = v.placa || '—';
+        const modelo = v.modelo || '—';
+        const status = v.status || '—';
+        const color = getStatusColor(status);
+        const card = document.createElement('div');
+        card.className = 'vehicle-card';
+        card.innerHTML = `<div class="vehicle-dot" style="background:${color}"></div><div class="vehicle-info"><div class="vehicle-placa">${placa}</div><div class="vehicle-meta">${modelo} • ${status}</div></div><div style="font-size:12px;color:var(--muted)">ID:${id}</div>`;
+        card.addEventListener('click', () => {
+          const m = markers.get(id);
+          if(m){
+            map.setView(m.getLatLng(), Math.max(map.getZoom(),15), {animate:true});
+            m.openPopup();
+          } else {
+            const latlng = (v.latitude!=null && v.longitude!=null) ? [v.latitude, v.longitude] : [MAP_CENTER.lat, MAP_CENTER.lng];
+            map.setView(latlng, 15, {animate:true});
+          }
+        });
+        vehicleListEl.appendChild(card);
+      });
+    }
+
+    async function doPoll(){
+      statusEl.textContent = 'Carregando dados...';
+      const vehicles = await fetchVehicles();
+      if(!vehicles) return;
+      updateMarkers(vehicles);
+    }
+
+    // polling control
+    let polling = true;
+    let pollHandle = null;
+    function startPolling(){ if(pollHandle) clearInterval(pollHandle); pollHandle = setInterval(doPoll, POLL_INTERVAL_MS); polling = true; document.getElementById('btn-toggle-poll').textContent = 'Pausar'; }
+    function stopPolling(){ if(pollHandle) { clearInterval(pollHandle); pollHandle = null; } polling = false; document.getElementById('btn-toggle-poll').textContent = 'Retomar'; }
+
+    document.getElementById('btn-refresh').addEventListener('click', doPoll);
+    document.getElementById('btn-toggle-poll').addEventListener('click', ()=>{ if(polling) stopPolling(); else startPolling(); });
+    document.getElementById('search-input').addEventListener('input', ()=>doPoll());
+    document.getElementById('status-filter').addEventListener('change', ()=>doPoll());
+
+    // inicial
+    doPoll(); startPolling();
+
+    // notas rápidas no console
+    console.log('FrotaPM monitoramento (demo) carregado — Blumenau, SC');
+  </script>
+</body>
+</html>
